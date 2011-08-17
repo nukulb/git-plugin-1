@@ -71,6 +71,9 @@ import org.kohsuke.stapler.StaplerResponse;
 import org.kohsuke.stapler.export.Exported;
 
 import net.sf.json.JSONObject;
+import hudson.model.TopLevelItem;
+import hudson.security.ACL;
+import org.acegisecurity.context.SecurityContextHolder;
 
 /**
  * Git SCM.
@@ -104,6 +107,10 @@ public class GitSCM extends SCM implements Serializable {
      * Optional local branch to work on.
      */
     private String localBranch;
+    /**
+     * For creating newJobs for all other branches.
+     */
+    private boolean newJobs;
     /**
      * Options for merging before a build.
      */
@@ -167,7 +174,7 @@ public class GitSCM extends SCM implements Serializable {
                 null,
                 false, Collections.<SubmoduleConfig>emptyList(), false,
                 false, new DefaultBuildChooser(), null, null, false, null,
-                null, null, null, false, false, false, null, null, false);
+                null, null, null, false, false, false, false, null, null, false);
     }
 
     @DataBoundConstructor
@@ -188,6 +195,7 @@ public class GitSCM extends SCM implements Serializable {
             String excludedUsers,
             String localBranch,
             boolean recursiveSubmodules,
+            boolean newJobs,
             boolean pruneBranches,
             boolean remotePoll,
             String gitConfigName,
@@ -236,6 +244,7 @@ public class GitSCM extends SCM implements Serializable {
         this.excludedRegions = excludedRegions;
         this.excludedUsers = excludedUsers;
         this.recursiveSubmodules = recursiveSubmodules;
+        this.newJobs = newJobs;
         this.pruneBranches = pruneBranches;
         if (remotePoll
             && (branches.size() != 1
@@ -465,6 +474,14 @@ public class GitSCM extends SCM implements Serializable {
         return this.pruneBranches;
     }
 
+    public void setNewJobs(boolean newJobs) {
+        this.newJobs = newJobs;
+    }
+
+    public boolean getNewJobs() {
+        return this.newJobs;
+    }
+    
     public boolean getRemotePoll() {
         return this.remotePoll;
     }
@@ -669,10 +686,59 @@ public class GitSCM extends SCM implements Serializable {
 
             public Boolean invoke(File localWorkspace, VirtualChannel channel) throws IOException {
                 IGitAPI git = new GitAPI(gitExe, new FilePath(localWorkspace), listener, environment);
-
+                if(newJobs){
+                    final String jobName = environment.get("JOB_NAME");
+                    listener.getLogger().println("Checking if new jobs are needed for "+jobName);
+                    Hudson h = Hudson.getInstance();
+                    if(h.getItem(jobName) != null){
+                        //get all the branches
+                        for(Branch branchSpec : git.getBranches()){
+                            String[] split = branchSpec.getName().split("/");
+                            String branchName;
+                            if(split.length < 2){
+                                branchName = split[0];
+                            }else{
+                                branchName = split[1];
+                            }
+                            String newJobName = jobName+"-"+branchName;
+                            //find branches already being built by this scm.
+                            boolean branchAlreadyBeingBuilt = false;
+                            for(BranchSpec currentBranchBeingBuilt : getBranches()){
+                                if(branchName.equals(currentBranchBeingBuilt.getName())
+                                        || branchSpec.getName().equals(currentBranchBeingBuilt.getName())
+                                        || branchSpec.getName().equals("master")){
+                                    branchAlreadyBeingBuilt = true;
+                                        }
+                            }
+                            if(h.getItem(newJobName)==null && !branchAlreadyBeingBuilt){
+                                TopLevelItem src = h.getItem(jobName);
+                                try{
+                                    SecurityContextHolder.getContext().setAuthentication(ACL.SYSTEM);
+                                    h.copy(src,newJobName);
+                                    //get project
+                                    AbstractProject newJobProject  = (AbstractProject)h.getItem(newJobName);
+                                    if(newJobProject != null){
+                                        GitSCM newJobSCM = (GitSCM)newJobProject.getScm();
+                                        //modify SCM
+                                        newJobSCM.setNewJobs(false);
+                                        List<BranchSpec> branches = new ArrayList<BranchSpec>();
+                                        branches.add(new BranchSpec(branchName));
+                                        newJobSCM.setBranches(branches);
+                                        newJobProject.save();
+                                        newJobProject.scheduleBuild();
+                                        listener.getLogger().println("New Job Name created "+newJobName);
+                                    }
+                                }catch(Exception e){
+                                    listener.getLogger().println("exception occured, could not create job called "+ e.getMessage());
+                                    e.printStackTrace();
+                                }
+                            }
+                        }
+                    }
+                }
                 if (git.hasGitRepo()) {
-                    // Repo is there - do a fetch
-                    listener.getLogger().println("Fetching changes from the remote Git repositories");
+                        // Repo is there - do a fetch
+                        listener.getLogger().println("Fetching changes from the remote Git repositories");
 
                     // Fetch updates
                     for (RemoteConfig remoteRepository : paramRepos) {
@@ -1466,6 +1532,7 @@ public class GitSCM extends SCM implements Serializable {
             req.getParameter("git.gitConfigEmail"),
             req.getParameter("git.skipTag") != null);
              */
+
         }
 
         /**
@@ -1600,6 +1667,10 @@ public class GitSCM extends SCM implements Serializable {
     public List<BranchSpec> getBranches() {
         return branches;
     }
+
+    public void setBranches(List<BranchSpec> branches) {
+        this.branches = branches;
+    }    
 
     @Exported
     public PreBuildMergeOptions getMergeOptions() {
