@@ -9,3 +9,4 @@ bin
 work
 nbactions.xml
 tags
+.DS_Store

@@ -139,7 +139,7 @@
 		</table>
 	  	
 	  </f:entry>
-      <f:entry title="Create new Hudson Jobs for all other git branches" field="newJobs" help="/plugin/git/help-jobsForBranches.html">
+      <f:entry title="Create new jobs for all other git branches" field="newJobs" help="/plugin/git/help-jobsForBranches.html">
           <f:checkbox/>
       </f:entry>  
           <f:entry title="Prune remote branches before build" field="pruneBranches" help="/plugin/git/prune.html">

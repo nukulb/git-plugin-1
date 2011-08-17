@@ -693,13 +693,11 @@ public class GitSCM extends SCM implements Serializable {
                     if(h.getItem(jobName) != null){
                         //get all the branches
                         for(Branch branchSpec : git.getBranches()){
+                            
+                            listener.getLogger().println("branchspec.getName "+branchSpec.getName());
                             String[] split = branchSpec.getName().split("/");
                             String branchName;
-                            if(split.length < 2){
-                                branchName = split[0];
-                            }else{
-                                branchName = split[1];
-                            }
+                            branchName = split[split.length-1];
                             String newJobName = jobName+"-"+branchName;
                             //find branches already being built by this scm.
                             boolean branchAlreadyBeingBuilt = false;
