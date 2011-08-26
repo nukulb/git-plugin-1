@@ -717,23 +717,41 @@ public class GitSCM extends SCM implements Serializable {
                 }
             }
         });
-        List<Branch> gitBranches = workingDirectory.act(new FileCallable<List<Branch>>() {
-
-            private static final long serialVersionUID = 1L;
-
-            public List<Branch> invoke(File localWorkspace, VirtualChannel channel) throws IOException {
-                IGitAPI git = new GitAPI(gitExe, new FilePath(localWorkspace), listener, environment);
-                return git.getBranches();
-            }
-        });
         if(newJobs){
+
+            List<Branch> gitBranchesToDelete = workingDirectory.act(new FileCallable<List<Branch>>() {
+
+                private static final long serialVersionUID = 1L;
+
+                public List<Branch> invoke(File localWorkspace, VirtualChannel channel) throws IOException {
+                    IGitAPI git = new GitAPI(gitExe, new FilePath(localWorkspace), listener, environment);
+                    return git.getBranches();
+                }
+            });
+
+            List<Branch> gitCurrentBranches = workingDirectory.act(new FileCallable<List<Branch>>() {
+
+                private static final long serialVersionUID = 1L;
+
+                public List<Branch> invoke(File localWorkspace, VirtualChannel channel) throws IOException {
+                    IGitAPI git = new GitAPI(gitExe, new FilePath(localWorkspace), listener, environment);
+                    //prune all local branches in order to get latest Info
+                    for (RemoteConfig remoteRepository : paramRepos) {
+                        git.prune(remoteRepository);
+                    }
+                    return git.getBranches();
+                }
+            });
             Hudson h = Hudson.getInstance();
             listener.getLogger().println("Hudson.getInstance()= "+h);
             final String jobName = environment.get("JOB_NAME");
             listener.getLogger().println("Checking if new jobs are needed for "+jobName);
             SecurityContextHolder.getContext().setAuthentication(ACL.SYSTEM);
             if(h.getItem(jobName) != null){
-                for(Branch branchSpec : gitBranches){
+                for(Branch branchSpec : gitCurrentBranches){
+                    if(gitBranchesToDelete.remove(branchSpec)){
+                        listener.getLogger().println("Branch to not remove "+branchSpec.getName());
+                    }
                     listener.getLogger().println("branchspec.getName "+branchSpec.getName());
                     String[] split = branchSpec.getName().split("/");
                     String branchName;
@@ -770,6 +788,22 @@ public class GitSCM extends SCM implements Serializable {
                             listener.getLogger().println("exception occured, could not create job called "+ e.getMessage());
                             e.printStackTrace();
                         }
+                    }
+                }
+            }
+            for(Branch branchSpec : gitBranchesToDelete){
+                listener.getLogger().println("Branch to remove "+branchSpec.getName());
+                String[] split = branchSpec.getName().split("/");
+                String branchName;
+                branchName = split[split.length-1];
+                String jobNameToDelete = jobName+"-"+branchName;
+                TopLevelItem itemToDelete = h.getItem(jobNameToDelete);
+                if(itemToDelete != null){
+                    try{
+                        itemToDelete.delete();
+                    } catch(Exception e){
+                        listener.getLogger().println("exception occured, could not create job called "+ e.getMessage());
+                        e.printStackTrace();
                     }
                 }
             }
